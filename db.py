@@ -4,6 +4,7 @@ import json
 import os
 import my_utils
 
+
 @dataclass_json
 @dataclass
 class DBTable(DBTable):
@@ -69,6 +70,7 @@ class DBTable(DBTable):
             for record in csv_reader:
                 if record and record[index_of_key] == str(key):
                     found = True
+                    clean_rows.append([])
                     continue
                 clean_rows.append(record)
 
@@ -91,8 +93,7 @@ class DBTable(DBTable):
         with open(f"db_files/{self.name}.csv", "r") as csv_file:
             csv_reader = csv.reader(csv_file)
 
-            next(csv_reader)
-            clean_rows = []
+            clean_rows = [next(csv_reader)]
             for record in csv_reader:
                 if not record:
                     continue
@@ -101,11 +102,15 @@ class DBTable(DBTable):
                     index_of_field = self.get_index_of_field(criterion.field_name)
                     if criterion.operator == "=":
                         criterion.operator = "=="
-                    operation += record[index_of_field] + criterion.operator + str(criterion.value) + " and "
+                    if isinstance(criterion.value, str):
+                        operation += f"'{record[index_of_field]}' {criterion.operator} '{criterion.value}' and "
+                    else:
+                        operation += f"{record[index_of_field]} {criterion.operator} {criterion.value} and "
 
                 if not eval(operation[:-4]):
                     clean_rows.append(record)
                 else:
+                    clean_rows.append([])
                     num_of_removed += 1
 
         with open(f"db_files/{self.name}.csv", "w", newline="") as csv_file:
@@ -164,7 +169,10 @@ class DBTable(DBTable):
                     index_of_field = self.get_index_of_field(criterion.field_name)
                     if criterion.operator == "=":
                         criterion.operator = "=="
-                    operation += '"' + record[index_of_field] + '"' + criterion.operator + str(criterion.value) + " and "
+                    if isinstance(criterion.value, str):
+                        operation += f"'{record[index_of_field]}' {criterion.operator} '{criterion.value}' and "
+                    else:
+                        operation += f"{record[index_of_field]} {criterion.operator} {criterion.value} and "
 
                 if eval(operation[:-4]):
                     result.append(dict(zip(self.get_fields_names(), record)))
@@ -178,7 +186,10 @@ class DBTable(DBTable):
 @dataclass_json
 @dataclass
 class DataBase(DataBase):
-    __NUM_TABLE__ = 0
+    def __init__(self):
+        with open("db_files/table_info.json", "r") as json_file:
+            json_data = json.load(json_file)
+            DataBase.__NUM_TABLE__ = len(json_data)
 
     def create_table(self,
                      table_name: str,
@@ -223,7 +234,8 @@ class DataBase(DataBase):
             try:
                 table = json_data[table_name]
                 return DBTable(table_name,
-                               [DBField(_name, my_utils.get_type(_type)) for _name, _type in zip(table["names"], table["types"])],
+                               [DBField(_name, my_utils.get_type(_type)) for _name, _type in
+                                zip(table["names"], table["types"])],
                                table["key"])
 
             except KeyError:
