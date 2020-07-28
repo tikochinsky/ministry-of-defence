@@ -2,7 +2,7 @@ from db_api import *
 import csv
 import json
 import os
-
+import my_utils
 
 @dataclass_json
 @dataclass
@@ -11,27 +11,165 @@ class DBTable(DBTable):
     fields: List[DBField]
     key_field_name: str
 
+    def get_fields_names(self) -> List[str]:
+        return [x.name for x in self.fields]
+
+    def get_index_of_field(self, field: str) -> int:
+        return self.get_fields_names().index(field)
+
     def count(self) -> int:
-        raise NotImplementedError
+        with open("db_files/table_info.json", "r") as json_file:
+            json_data = json.load(json_file)
+            return json_data[self.name]["count"]
 
     def insert_record(self, values: Dict[str, Any]) -> None:
-        raise NotImplementedError
+        # num of records > 1000
+
+        # key isn't in the dict keys
+        if self.key_field_name not in values.keys():
+            raise ValueError("Key is a must field")
+
+        # if there are more fields in values
+        if len(set(values.keys()) - set(self.get_fields_names())) != 0:
+            raise ValueError("Column name not found")
+
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+
+            # if key already exists - later via index
+            index_of_key = self.get_index_of_field(self.key_field_name)
+            next(csv_reader)
+            for record in csv_reader:
+                if record and record[index_of_key] == str(values[self.key_field_name]):
+                    raise ValueError("Key already exists")
+
+            # insert according to columns order
+            record_to_insert = []
+            for name in self.get_fields_names():
+                record_to_insert.append(values.get(name))
+
+        with open(f"db_files/{self.name}.csv", "a") as csv_file:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow(record_to_insert)
+
+        # update the info of the table
+        with open("db_files/table_info.json", "r") as json_file:
+            json_data = json.load(json_file)
+        json_data[self.name]["count"] += 1
+        with open("db_files/table_info.json", "w") as json_file:
+            json.dump(json_data, json_file)
 
     def delete_record(self, key: Any) -> None:
-        raise NotImplementedError
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+            index_of_key = self.get_index_of_field(self.key_field_name)
+
+            found = False
+            clean_rows = []
+            for record in csv_reader:
+                if record and record[index_of_key] == str(key):
+                    found = True
+                    continue
+                clean_rows.append(record)
+
+            if not found:
+                raise ValueError("Key not found")
+
+        with open(f"db_files/{self.name}.csv", "w", newline="") as csv_file:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerows(clean_rows)
+
+        # update the info of the table
+        with open("db_files/table_info.json", "r") as json_file:
+            json_data = json.load(json_file)
+        json_data[self.name]["count"] -= 1
+        with open("db_files/table_info.json", "w") as json_file:
+            json.dump(json_data, json_file)
 
     def delete_records(self, criteria: List[SelectionCriteria]) -> None:
-        raise NotImplementedError
+        num_of_removed = 0
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+
+            next(csv_reader)
+            clean_rows = []
+            for record in csv_reader:
+                if not record:
+                    continue
+                operation = ""
+                for criterion in criteria:
+                    index_of_field = self.get_index_of_field(criterion.field_name)
+                    if criterion.operator == "=":
+                        criterion.operator = "=="
+                    operation += record[index_of_field] + criterion.operator + str(criterion.value) + " and "
+
+                if not eval(operation[:-4]):
+                    clean_rows.append(record)
+                else:
+                    num_of_removed += 1
+
+        with open(f"db_files/{self.name}.csv", "w", newline="") as csv_file:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerows(clean_rows)
+
+        # update the info of the table
+        with open("db_files/table_info.json", "r") as json_file:
+            json_data = json.load(json_file)
+        json_data[self.name]["count"] -= num_of_removed
+        with open("db_files/table_info.json", "w") as json_file:
+            json.dump(json_data, json_file)
 
     def get_record(self, key: Any) -> Dict[str, Any]:
-        raise NotImplementedError
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+
+            index_of_key = self.get_index_of_field(self.key_field_name)
+
+            next(csv_reader)
+            for record in csv_reader:
+                if record[index_of_key] == str(key):
+                    return dict(zip(self.get_fields_names(), record))
+
+        raise ValueError("The record doesn't exist in the table")
 
     def update_record(self, key: Any, values: Dict[str, Any]) -> None:
-        raise NotImplementedError
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+
+            index_of_key = self.get_index_of_field(self.key_field_name)
+            clean_rows = [record for record in csv_reader if record and record[index_of_key] != str(key)]
+            # keep the original --------------------------------------------------!!!!!!!!!
+            record_to_insert = []
+            for name in self.get_fields_names():
+                record_to_insert.append(values.get(name))
+            record_to_insert[self.get_index_of_field(self.key_field_name)] = key
+            clean_rows.append(record_to_insert)
+
+        with open(f"db_files/{self.name}.csv", "w", newline="") as csv_file:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerows(clean_rows)
 
     def query_table(self, criteria: List[SelectionCriteria]) \
             -> List[Dict[str, Any]]:
-        raise NotImplementedError
+        result = []
+
+        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+            csv_reader = csv.reader(csv_file)
+            next(csv_reader)
+            for record in csv_reader:
+                if not record:
+                    continue
+                operation = ""
+                for criterion in criteria:
+                    index_of_field = self.get_index_of_field(criterion.field_name)
+                    if criterion.operator == "=":
+                        criterion.operator = "=="
+                    operation += '"' + record[index_of_field] + '"' + criterion.operator + str(criterion.value) + " and "
+
+                if eval(operation[:-4]):
+                    result.append(dict(zip(self.get_fields_names(), record)))
+
+        return result
 
     def create_index(self, field_to_index: str) -> None:
         raise NotImplementedError
@@ -54,10 +192,10 @@ class DataBase(DataBase):
         if key_field_name not in fields_names:
             raise ValueError("Key isn't in fields names")
 
-        with open(f"db_files/{table_name}.csv", "w") as csv_file:
+        with open(f"db_files/{table_name}.csv", "w", newline="") as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(fields_names)
-            DataBase.__NUM_TABLE__ += 1
+        DataBase.__NUM_TABLE__ += 1
 
         with open("db_files/table_info.json", "w") as json_file:
             if DataBase.__NUM_TABLE__ == 1:
@@ -68,7 +206,8 @@ class DataBase(DataBase):
             json_data[table_name] = {
                 "key": key_field_name,
                 "names": fields_names,
-                "types": fields_types
+                "types": fields_types,
+                "count": 0
                 # and more...
             }
             json.dump(json_data, json_file)
@@ -84,27 +223,34 @@ class DataBase(DataBase):
             try:
                 table = json_data[table_name]
                 return DBTable(table_name,
-                               [DBField(_name, type(_type)) for _name, _type in zip(table["names"], table["types"])],
+                               [DBField(_name, my_utils.get_type(_type)) for _name, _type in zip(table["names"], table["types"])],
                                table["key"])
 
             except KeyError:
                 raise ValueError("Table is not exists")
 
     def delete_table(self, table_name: str) -> None:
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-            try:
-                del json_data[table_name]
-                json.dump(json_data, json_file)
-                os.remove(f"{table_name}.csv")
+        try:
+            with open("db_files/table_info.json", "r") as json_file:
+                json_data = json.load(json_file)
 
-            except KeyError:
-                raise ValueError("Table is not exists")
+            del json_data[table_name]
+
+            with open("db_files/table_info.json", "w") as json_file:
+                json.dump(json_data, json_file)
+
+            os.remove(f"db_files/{table_name}.csv")
+            DataBase.__NUM_TABLE__ -= 1
+
+        except KeyError:
+            raise ValueError("Table does not exist")
 
     def get_tables_names(self) -> List[Any]:
+        if self.__NUM_TABLE__ == 0:
+            return []
         with open("db_files/table_info.json", "r") as json_file:
             json_data = json.load(json_file)
-            return json_data.keys()
+            return list(json_data.keys())
 
     def query_multiple_tables(
             self,
