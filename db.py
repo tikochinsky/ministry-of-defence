@@ -35,24 +35,34 @@ class DBTable(DBTable):
         if len(set(values.keys()) - set(self.get_fields_names())) != 0:
             raise ValueError("Column name not found")
 
-        with open(f"db_files/{self.name}.csv", "r") as csv_file:
+        # insert according to columns order
+        record_to_insert = []
+        for name in self.get_fields_names():
+            record_to_insert.append(values.get(name))
+
+        with open(f"db_files/{self.name}.csv", "r", newline="") as csv_file:
             csv_reader = csv.reader(csv_file)
 
+            rows = []
             # if key already exists - later via index
             index_of_key = self.get_index_of_field(self.key_field_name)
-            next(csv_reader)
             for record in csv_reader:
                 if record and record[index_of_key] == str(values[self.key_field_name]):
                     raise ValueError("Key already exists")
+                rows.append(record)
 
-            # insert according to columns order
-            record_to_insert = []
-            for name in self.get_fields_names():
-                record_to_insert.append(values.get(name))
+            inserted = False
+            for i, record in enumerate(rows):
+                if not record:
+                    rows[i] = record_to_insert
+                    inserted = True
+                    break
+            if not inserted:
+                rows.append(record_to_insert)
 
-        with open(f"db_files/{self.name}.csv", "a") as csv_file:
+        with open(f"db_files/{self.name}.csv", "w", newline="") as csv_file:
             csv_writer = csv.writer(csv_file)
-            csv_writer.writerow(record_to_insert)
+            csv_writer.writerows(rows)
 
         DataBase.table_info[self.name]["count"] += 1
 
@@ -67,8 +77,8 @@ class DBTable(DBTable):
                 if record and record[index_of_key] == str(key):
                     found = True
                     clean_rows.append([])
-                    continue
-                clean_rows.append(record)
+                else:
+                    clean_rows.append(record)
 
             if not found:
                 raise ValueError("Key not found")
