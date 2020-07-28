@@ -19,9 +19,10 @@ class DBTable(DBTable):
         return self.get_fields_names().index(field)
 
     def count(self) -> int:
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-            return json_data[self.name]["count"]
+        # with open("db_files/table_info.json", "r") as json_file:
+        #     json_data = json.load(json_file)
+        #     return json_data[self.name]["count"]
+        return DataBase.table_info[self.name]["count"]
 
     def insert_record(self, values: Dict[str, Any]) -> None:
         # num of records > 1000
@@ -53,12 +54,7 @@ class DBTable(DBTable):
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(record_to_insert)
 
-        # update the info of the table
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-        json_data[self.name]["count"] += 1
-        with open("db_files/table_info.json", "w") as json_file:
-            json.dump(json_data, json_file)
+        DataBase.table_info[self.name]["count"] += 1
 
     def delete_record(self, key: Any) -> None:
         with open(f"db_files/{self.name}.csv", "r") as csv_file:
@@ -81,12 +77,7 @@ class DBTable(DBTable):
             csv_writer = csv.writer(csv_file)
             csv_writer.writerows(clean_rows)
 
-        # update the info of the table
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-        json_data[self.name]["count"] -= 1
-        with open("db_files/table_info.json", "w") as json_file:
-            json.dump(json_data, json_file)
+        DataBase.table_info[self.name]["count"] -= 1
 
     def delete_records(self, criteria: List[SelectionCriteria]) -> None:
         num_of_removed = 0
@@ -117,12 +108,7 @@ class DBTable(DBTable):
             csv_writer = csv.writer(csv_file)
             csv_writer.writerows(clean_rows)
 
-        # update the info of the table
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-        json_data[self.name]["count"] -= num_of_removed
-        with open("db_files/table_info.json", "w") as json_file:
-            json.dump(json_data, json_file)
+        DataBase.table_info[self.name]["count"] -= num_of_removed
 
     def get_record(self, key: Any) -> Dict[str, Any]:
         with open(f"db_files/{self.name}.csv", "r") as csv_file:
@@ -187,9 +173,12 @@ class DBTable(DBTable):
 @dataclass
 class DataBase(DataBase):
     def __init__(self):
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-            DataBase.__NUM_TABLE__ = len(json_data)
+        try:
+            with open("table_info.json", "r") as json_file:
+                DataBase.table_info = json.load(json_file)
+
+        except FileNotFoundError:
+            DataBase.table_info = {}
 
     def create_table(self,
                      table_name: str,
@@ -206,63 +195,45 @@ class DataBase(DataBase):
         with open(f"db_files/{table_name}.csv", "w", newline="") as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(fields_names)
-        DataBase.__NUM_TABLE__ += 1
+        # DataBase.__NUM_TABLE__ += 1
 
-        with open("db_files/table_info.json", "w") as json_file:
-            if DataBase.__NUM_TABLE__ == 1:
-                json_data = {}
-            else:
-                json_data = json.load(json_file)
+        if table_name in DataBase.table_info.keys():
+            raise ValueError("Table already exists")
 
-            json_data[table_name] = {
-                "key": key_field_name,
-                "names": fields_names,
-                "types": fields_types,
-                "count": 0
-                # and more...
-            }
-            json.dump(json_data, json_file)
+        DataBase.table_info[table_name] = {
+            "key": key_field_name,
+            "names": fields_names,
+            "types": fields_types,
+            "count": 0
+            # and more...
+        }
 
         return DBTable(table_name, fields, key_field_name)
 
     def num_tables(self) -> int:
-        return DataBase.__NUM_TABLE__
+        return len(DataBase.table_info)
 
     def get_table(self, table_name: str) -> DBTable:
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-            try:
-                table = json_data[table_name]
-                return DBTable(table_name,
-                               [DBField(_name, my_utils.get_type(_type)) for _name, _type in
-                                zip(table["names"], table["types"])],
-                               table["key"])
+        try:
+            table = DataBase.table_info[table_name]
+            return DBTable(table_name,
+                           [DBField(_name, my_utils.get_type(_type)) for _name, _type in
+                            zip(table["names"], table["types"])],
+                           table["key"])
 
-            except KeyError:
-                raise ValueError("Table is not exists")
+        except KeyError:
+            raise ValueError("Table is not exists")
 
     def delete_table(self, table_name: str) -> None:
         try:
-            with open("db_files/table_info.json", "r") as json_file:
-                json_data = json.load(json_file)
-
-            del json_data[table_name]
-
-            with open("db_files/table_info.json", "w") as json_file:
-                json.dump(json_data, json_file)
-
+            del DataBase.table_info[table_name]
             os.remove(f"db_files/{table_name}.csv")
-            DataBase.__NUM_TABLE__ -= 1
 
         except KeyError:
             raise ValueError("Table does not exist")
 
     def get_tables_names(self) -> List[Any]:
-        if self.__NUM_TABLE__ == 0:
-            return []
-        with open("db_files/table_info.json", "r") as json_file:
-            json_data = json.load(json_file)
-            return list(json_data.keys())
+        return list(DataBase.table_info.keys())
 
     def query_multiple_tables(
             self,
@@ -271,3 +242,7 @@ class DataBase(DataBase):
             fields_to_join_by: List[str]
     ) -> List[Dict[str, Any]]:
         raise NotImplementedError
+
+    def __del__(self):
+        with open("table_info.json", "w") as json_file:
+            json.dump(DataBase.table_info, json_file)
